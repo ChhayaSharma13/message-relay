@@ -1,0 +1,7 @@
+com/chhaya/relay/protocol/ClientMessage$Ack.class
+com/chhaya/relay/protocol/ClientMessage$Register.class
+com/chhaya/relay/core/Message.class
+com/chhaya/relay/core/Mailbox.class
+com/chhaya/relay/protocol/ClientMessage$Send.class
+com/chhaya/relay/core/OfferResult.class
+com/chhaya/relay/protocol/ClientMessage.class
