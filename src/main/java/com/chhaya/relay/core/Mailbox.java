@@ -1,108 +1,85 @@
 package com.chhaya.relay.core;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * One recipient's messages. A message is QUEUED until delivered,
- * then AWAITING ACK
- * until acknowledged, then removed. On disconnect, messages awaiting ack return to
- * the front of the queue so they are redelivered first (at-least-once, FIFO).
+ * Holds the messages for one user.
  *
- * Thread-safe: every method holds this mailbox's own lock. No method ever holds
- * two locks, so deadlock is impossible.
+ * Each message goes through these steps:
+ *   1. waiting  - stored, not sent to the user yet
+ *   2. unacked  - sent to the user, waiting for their ACK
+ *   3. removed  - the user sent an ACK
+ *
+ * If the user disconnects before sending an ACK, the unacked messages are
+ * moved back to the front of the waiting list, so they are sent again first.
+ *
+ * All public methods are synchronized, so only one thread can use a mailbox
+ * at a time. Different users' mailboxes don't block each other.
  */
-final class Mailbox {
+class Mailbox {
 
-    private final int capacity;
-    private final Deque<Message> queued = new ArrayDeque<>();
-    private final Map<String, Message> awaitingAck = new LinkedHashMap<>(); // keeps delivery order
-    private final ReentrantLock lock = new ReentrantLock();
+    private final int maxMessages;
+    private final List<Message> waiting = new ArrayList<>();   // not sent yet, oldest first
+    private final List<Message> unacked = new ArrayList<>();   // sent, waiting for an ACK, oldest first
 
-    Mailbox(int capacity) {
-        if (capacity <= 0) {
-            throw new IllegalArgumentException("capacity must be positive: " + capacity);
+    Mailbox(int maxMessages) {
+        if (maxMessages <= 0) {
+            throw new IllegalArgumentException("maxMessages must be positive: " + maxMessages);
         }
-        this.capacity = capacity;
+        this.maxMessages = maxMessages;
     }
 
-    /** Stores a message. Duplicate check comes before the capacity check, so a retry is accepted even when full. */
-    OfferResult offer(Message message) {
-        lock.lock();
-        try {
-            if (contains(message.id())) {
-                return OfferResult.DUPLICATE;
+    synchronized OfferResult add(Message message) {
+        // Check for a duplicate first: if a client retries a message we already
+        // have, we say "accepted" even if the mailbox has filled up since.
+        if (hasMessage(message.id())) {
+            return OfferResult.DUPLICATE;
+        }
+        if (size() >= maxMessages) {
+            return OfferResult.FULL;
+        }
+        waiting.add(message);
+        return OfferResult.ADDED;
+    }
+
+    /** Returns all waiting messages and marks them as unacked. */
+    synchronized List<Message> takeWaitingMessages() {
+        List<Message> toSend = new ArrayList<>(waiting);
+        unacked.addAll(waiting);
+        waiting.clear();
+        return toSend;
+    }
+
+    /** Returns true if the message was unacked and is now removed. */
+    synchronized boolean ack(String messageId) {
+        for (int i = 0; i < unacked.size(); i++) {
+            if (unacked.get(i).id().equals(messageId)) {
+                unacked.remove(i);
+                return true;
             }
-            if (queued.size() + awaitingAck.size() >= capacity) {
-                return OfferResult.FULL;
+        }
+        return false;
+    }
+
+    /** Called when the user disconnects: unacked messages go back to the front, in the same order. */
+    synchronized void moveUnackedBackToWaiting() {
+        waiting.addAll(0, unacked);
+        unacked.clear();
+    }
+
+    synchronized int size() {
+        return waiting.size() + unacked.size();
+    }
+
+    private boolean hasMessage(String messageId) {
+        for (Message message : waiting) {
+            if (message.id().equals(messageId)) {
+                return true;
             }
-            queued.addLast(message);
-            return OfferResult.ADDED;
-        } finally {
-            lock.unlock();
         }
-    }
-
-    /** Moves every queued message to awaiting ack and returns them, oldest first. */
-    List<Message> takeForDelivery() {
-        lock.lock();
-        try {
-            List<Message> batch = new ArrayList<>(queued);
-            queued.clear();
-            for (Message m : batch) {
-                awaitingAck.put(m.id(), m);
-            }
-            return batch;
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    /** Removes a message awaiting ack. Returns false for unknown or already-acked ids (harmless). */
-    boolean ack(String messageId) {
-        lock.lock();
-        try {
-            return awaitingAck.remove(messageId) != null;
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    /** Called when the recipient disconnects: unacked messages go back to the front, in their original order. */
-    void returnAwaitingAck() {
-        lock.lock();
-        try {
-            List<Message> unacked = new ArrayList<>(awaitingAck.values());
-            for (int i = unacked.size() - 1; i >= 0; i--) {   // reverse, so addFirst keeps original order
-                queued.addFirst(unacked.get(i));
-            }
-            awaitingAck.clear();
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    int size() {
-        lock.lock();
-        try {
-            return queued.size() + awaitingAck.size();
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    // Caller must hold the lock.
-    private boolean contains(String messageId) {
-        if (awaitingAck.containsKey(messageId)) {
-            return true;
-        }
-        for (Message m : queued) {
-            if (m.id().equals(messageId)) {
+        for (Message message : unacked) {
+            if (message.id().equals(messageId)) {
                 return true;
             }
         }

@@ -8,44 +8,57 @@ import org.junit.jupiter.api.Test;
 
 class MailboxTest {
 
-    private static Message msg(String id) {
+    private Message message(String id) {
         return new Message(id, "alice", "bob", "hello " + id);
     }
 
     @Test
     void ackedMessageIsRemoved() {
-        var mailbox = new Mailbox(10);
-        mailbox.offer(msg("m-1"));
+        Mailbox mailbox = new Mailbox(10);
+        mailbox.add(message("m-1"));
 
-        List<Message> delivered = mailbox.takeForDelivery();
+        mailbox.takeWaitingMessages();
         boolean acked = mailbox.ack("m-1");
 
-        assertEquals(List.of(msg("m-1")), delivered);
         assertTrue(acked);
         assertEquals(0, mailbox.size());
     }
 
     @Test
-    void messagesForOfflineRecipientAreKeptInOrder() {
-        var mailbox = new Mailbox(10);
+    void messagesForOfflineUserAreKeptInOrder() {
+        Mailbox mailbox = new Mailbox(10);
+        mailbox.add(message("m-1"));
+        mailbox.add(message("m-2"));
 
-        // recipient is offline: nobody calls takeForDelivery yet
-        mailbox.offer(msg("m-1"));
-        mailbox.offer(msg("m-2"));
-
-        // recipient reconnects
-        assertEquals(List.of(msg("m-1"), msg("m-2")), mailbox.takeForDelivery());
+        assertEquals(List.of(message("m-1"), message("m-2")), mailbox.takeWaitingMessages());
     }
 
     @Test
-    void unackedMessageIsRedeliveredFirstAfterDisconnect() {
-        var mailbox = new Mailbox(10);
-        mailbox.offer(msg("m-1"));
-        mailbox.takeForDelivery();       // m-1 is now awaiting ack
-        mailbox.offer(msg("m-2"));       // arrives while m-1 is unacked
+    void unackedMessageIsSentAgainFirstAfterDisconnect() {
+        Mailbox mailbox = new Mailbox(10);
+        mailbox.add(message("m-1"));
+        mailbox.takeWaitingMessages();   // m-1 sent, not acked
+        mailbox.add(message("m-2"));     // m-2 arrives meanwhile
 
-        mailbox.returnAwaitingAck();     // connection drops before the ack
+        mailbox.moveUnackedBackToWaiting();   // user disconnected
 
-        assertEquals(List.of(msg("m-1"), msg("m-2")), mailbox.takeForDelivery());
+        assertEquals(List.of(message("m-1"), message("m-2")), mailbox.takeWaitingMessages());
+    }
+
+    @Test
+    void fullMailboxRejectsNewMessages() {
+        Mailbox mailbox = new Mailbox(1);
+        mailbox.add(message("m-1"));
+
+        assertEquals(OfferResult.FULL, mailbox.add(message("m-2")));
+    }
+
+    @Test
+    void duplicateMessageIsNotStoredTwice() {
+        Mailbox mailbox = new Mailbox(10);
+        mailbox.add(message("m-1"));
+
+        assertEquals(OfferResult.DUPLICATE, mailbox.add(message("m-1")));
+        assertEquals(1, mailbox.size());
     }
 }
