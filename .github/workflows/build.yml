@@ -26,3 +26,6 @@ jobs:
         with:
           name: relay-jar
           path: target/relay.jar
+
+      - name: Build Docker image
+        run: docker build -t message-relay .

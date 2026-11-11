@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 
 class BrokerTest {
 
-    // A pretend connection that just remembers what it was sent.
+    // A fake connection that just remembers what it was sent.
     private static class FakeConnection implements Connection {
         List<Message> received = new ArrayList<>();
         boolean closed = false;

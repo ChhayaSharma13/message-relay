@@ -16,7 +16,7 @@ public class Broker {
     private final int maxMessagesPerMailbox;
     private final int maxMessageLength;
 
-    // One mailbox per user name. Kept even when the user is offline.
+    // One mailbox per username. Kept even when the user is offline.
     private final Map<String, Mailbox> mailboxes = new ConcurrentHashMap<>();
 
     // The current connection of each user who is online right now.

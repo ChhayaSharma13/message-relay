@@ -1,14 +1,22 @@
 package com.chhaya.relay.core;
 
 /**
- * A connected client, as the Broker sees it.
- * The server will provide the real one; tests use a fake one.
+ * How the Broker talks to a connected client.
+ *
+ * The Broker only needs to do two things to a client: give it a message and
+ * close it. Keeping that behind this interface means the Broker has no
+ * networking code. In the running server, ClientConnection implements it;
+ * in tests, a simple fake records what it was given.
  */
 public interface Connection {
 
-    /** Send a message to this client. Should not block: queue it and return. */
+    /**
+     * Gives this client a message to send. This is called on the sender's
+     * thread, so it must return quickly: the real implementation queues the
+     * message instead of writing it straight to the network.
+     */
     void deliver(Message message);
 
-    /** Close this connection. */
+    /** Closes this client's connection, for example when the same name connects from somewhere else. */
     void close();
 }
